@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets / local config
+.env
+.streamlit/secrets.toml
+
+# Raw SSP spreadsheets (~70 MB each) and local caches; processed data in data/ is committed
+data/raw/
+*.xlsx
+cache/
+
+# Delivery zip and OS/editor files
+*.zip
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Internal planning notes
+IMPLEMENTATION_PLAN.md
