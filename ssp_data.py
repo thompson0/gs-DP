@@ -1,33 +1,50 @@
 import csv
 import gzip
 import http.client
-import json
 import os
 import re
 import shutil
 import time
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
 
 BASE_URL = "https://www.ssp.sp.gov.br/"
-INDEX_URL = BASE_URL + "assets/estatistica/transparencia/baseDadosCelVeiEObjSub.json"
-GROUPS = ("Celulares subtraídos", "Objetos subtraídos")
-YEARS = ("2025", "2026")
+SOURCES = [
+    "assets/estatistica/transparencia/spDados/SPDadosCriminais_2025.xlsx",
+    "assets/estatistica/transparencia/spDados/SPDadosCriminais_2026.xlsx",
+    "assets/estatistica/vitimas-violencia-domestica/Base_Violência contra mulher.xlsx",
+]
+MIN_YEAR = 2025
+CATEGORY = {
+    "FURTO - OUTROS": "furto",
+    "ROUBO - OUTROS": "roubo",
+    "ROUBO DE VEÍCULO": "roubo",
+    "AMEAÇA": "ameaca",
+    "DESCUMPRIMENTO DE MEDIDA PROTETIVA DE URGÊNCIA": "ameaca",
+    "PORTE DE ARMA": "arma",
+    "LESÃO CORPORAL DOLOSA": "lesao",
+    "PERSEGUIR": "perseguicao",
+    "EXTORSÃO MEDIANTE SEQUESTRO": "sequestro",
+    "TENTATIVA DE HOMICÍDIO": "tentativa_homicidio",
+    "OUTROS C/C/ DIGNIDADE SEXUAL": "sexual",
+    "ESTUPRO": "sexual",
+    "HOMICÍDIO DOLOSO": "homicidio",
+    "FEMINICÍDIO": "homicidio",
+    "LATROCÍNIO": "homicidio",
+    "LESÃO CORPORAL SEGUIDA DE MORTE": "homicidio",
+}
 HERE = os.path.dirname(os.path.abspath(__file__))
 RAW_DIR = os.path.join(HERE, "data", "raw")
 OUT_PATH = os.path.join(HERE, "data", "crimes_sp.csv.gz")
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
 LAT_MIN, LAT_MAX, LON_MIN, LON_MAX = -24.01, -23.35, -46.83, -46.36
-ALIASES = {"HORA_OCORRENCIA_BO": "HORA_OCORRENCIA"}
+ALIASES = {"HORA_OCORRENCIA_BO": "HORA_OCORRENCIA", "DESC_PERIODO": "DESCR_PERIODO",
+           "NOME_MUNICIPIO_CIRCUNSCRICAO": "NOME_MUNICIPIO_CIRC", "NOME_MUNICIPIO_CIRCUNCRIÇÃO": "NOME_MUNICIPIO_CIRC"}
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-
-
-def fetch(url):
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=300) as r:
-        return r.read()
 
 
 def download(url, path, tries=5):
@@ -46,20 +63,14 @@ def download(url, path, tries=5):
 
 
 def download_all():
-    index = json.loads(fetch(INDEX_URL).decode("utf-8-sig"))
     os.makedirs(RAW_DIR, exist_ok=True)
     paths = []
-    for group in index["data"]:
-        if group["nome"] not in GROUPS:
-            continue
-        for item in group["lista"]:
-            if item["periodo"] not in YEARS:
-                continue
-            path = os.path.join(RAW_DIR, os.path.basename(item["arquivo"]))
-            if not os.path.exists(path):
-                print(f"Baixando {item['arquivo']} ...")
-                download(BASE_URL + item["arquivo"], path)
-            paths.append(path)
+    for source in SOURCES:
+        path = os.path.join(RAW_DIR, os.path.basename(source).replace(" ", "_"))
+        if not os.path.exists(path):
+            print(f"Baixando {source} ...")
+            download(BASE_URL + urllib.parse.quote(source), path)
+        paths.append(path)
     return paths
 
 
@@ -121,9 +132,8 @@ def period_of(descr, hora):
 def clean(r):
     if (r.get("NOME_MUNICIPIO_CIRC") or "").strip().upper() != "S.PAULO":
         return None
-    rubrica = (r.get("RUBRICA") or "").strip().lower()
-    crime = "furto" if rubrica.startswith("furto") else "roubo" if rubrica.startswith("roubo") else None
-    if crime is None:
+    crime = CATEGORY.get((r.get("NATUREZA_APURADA") or "").strip().upper())
+    if crime is None or (r.get("DESCR_TIPOLOCAL") or "").strip() != "Via Pública":
         return None
     try:
         lat = float(str(r.get("LATITUDE")).replace(",", "."))
@@ -131,7 +141,7 @@ def clean(r):
         year = int(float(r.get("ANO_BO")))
     except (TypeError, ValueError):
         return None
-    if not (LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX):
+    if year < MIN_YEAR or not (LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX):
         return None
     return round(lat, 5), round(lon, 5), period_of(r.get("DESCR_PERIODO"), r.get("HORA_OCORRENCIA")), crime, year
 
@@ -144,7 +154,7 @@ def filter_rows(rows, seen, stats):
         if rec is None:
             stats["dropped"] += 1
             continue
-        key = (r.get("ID_DELEGACIA"), r.get("ANO_BO"), r.get("NUM_BO"))
+        key = (r.get("NOME_DELEGACIA"), r.get("ANO_BO"), r.get("NUM_BO"), rec[3])
         if r.get("NUM_BO") in (None, "", "NULL"):
             stats["no_bo_number"] += 1
         elif key in seen:

@@ -1,5 +1,6 @@
 import math
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -9,7 +10,7 @@ from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from streamlit_js_eval import streamlit_js_eval
 
-from city_graph import CRIMES_PATH, build_city, geocode, nearest_node
+from city_graph import CRIMES_PATH, all_crimes, build_city, geocode, nearest_node
 from routing import dijkstra, haversine_m, nearest_safe_table, path_length_m, path_to_safe, safest_within
 
 APP_NAME = "Chega Bem - HeraGPS"
@@ -39,6 +40,11 @@ GPS_JS = """new Promise(resolve => {
 st.set_page_config(page_title=APP_NAME, page_icon=os.path.join(ASSETS, "favicon.png"), layout="wide")
 st.logo(os.path.join(ASSETS, "logo_dark.png"), icon_image=os.path.join(ASSETS, "favicon.png"), size="large")
 st.html("<style>[data-testid=stElementContainer]:has(iframe[title*=streamlit_js_eval]){display:none}</style>")
+
+
+@st.cache_resource(show_spinner=False)
+def preload_crimes():
+    threading.Thread(target=all_crimes, args=(CRIMES_PATH,), daemon=True).start()
 
 
 @st.cache_resource(show_spinner=False, max_entries=16)
@@ -174,7 +180,7 @@ def gps_origin():
 
 
 def sidebar():
-    st.sidebar.caption("Rotas a pé mais seguras, calculadas com furtos e roubos registrados pela SSP-SP.")
+    st.sidebar.caption("Rotas a pé mais seguras, calculadas com as ocorrências registradas pela SSP-SP.")
     mode = st.sidebar.radio("Origem", ["Minha localização (GPS)", "Digitar endereço"])
     origin = accuracy = origin_label = origin_text = None
     if mode.startswith("Minha"):
@@ -323,11 +329,13 @@ def route_screen(trip):
         else:
             st.error("Nenhum ponto seguro encontrado nesta região. Ligue 190.")
 
-    show_crimes = st.checkbox("Mostrar ocorrências registradas no mapa")
+    show_crimes = st.checkbox("Mostrar ocorrências registradas no mapa",
+                              help="Peso por gravidade: furto 1; roubo, ameaça e porte de arma 2; lesão corporal e perseguição 3; sequestro, tentativa de homicídio e crime sexual 4; homicídio, feminicídio e latrocínio 5.")
     m = folium.Map(tiles="OpenStreetMap", control_scale=True)
     if show_crimes:
-        HeatMap([(lat, lon) for lat, lon, p in city.crimes if p in (period, "unknown")],
-                radius=12, blur=15, min_opacity=0.3).add_to(m)
+        HeatMap([(lat, lon, w) for lat, lon, p, w in city.crimes if p in (period, "unknown")],
+                radius=14, blur=18, min_opacity=0.3, max_zoom=15,
+                gradient={0.3: "#F2D16B", 0.6: "#E8862A", 0.85: "#C62828", 1: "#7A0E0E"}).add_to(m)
     for other, (other_path, _) in routes.items():
         if other != choice:
             folium.PolyLine(path_points(city, other_path), color="#7A7A7A", weight=4,
@@ -374,3 +382,4 @@ else:
         route_screen(st.session_state.trip)
     else:
         welcome(mode, origin, accuracy)
+    preload_crimes()

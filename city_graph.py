@@ -1,4 +1,3 @@
-import csv
 import gzip
 import json
 import math
@@ -12,6 +11,10 @@ from functools import lru_cache
 from routing import haversine_m
 
 W_DENSITY = 1.0
+CRIME_WEIGHT = {
+    "furto": 1, "roubo": 2, "ameaca": 2, "arma": 2, "lesao": 3, "perseguicao": 3,
+    "sequestro": 4, "tentativa_homicidio": 4, "sexual": 4, "homicidio": 5,
+}
 MIN_EDGE_M = 20
 LIGHT_PENALTY_NIGHT = 1.5
 LIGHT_PENALTY_DAY = 0.2
@@ -116,8 +119,13 @@ def fetch_osm(bbox):
 
 @lru_cache(maxsize=1)
 def all_crimes(path):
-    with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
-        return [(float(r["lat"]), float(r["lon"]), r["period"]) for r in csv.DictReader(f)]
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        lines = f.read().splitlines()[1:]
+    crimes = []
+    for line in lines:
+        lat, lon, period, crime, _ = line.split(",")
+        crimes.append((float(lat), float(lon), period, CRIME_WEIGHT[crime]))
+    return crimes
 
 
 def load_crimes(bbox):
@@ -133,7 +141,7 @@ def _seg_dist(px, py, ax, ay, bx, by):
 
 
 def assign_crimes(geoms, crimes, max_m=CRIME_SNAP_M):
-    counts = [[0, 0] for _ in geoms]
+    counts = [[0, 0, 0, 0] for _ in geoms]
     if not geoms or not crimes:
         return counts
     lat0, lon0 = geoms[0][0]
@@ -151,7 +159,7 @@ def assign_crimes(geoms, crimes, max_m=CRIME_SNAP_M):
                 for cy in range(int(math.floor(min(ay, by) / cell)), int(math.floor(max(ay, by) / cell)) + 1):
                     grid[(cx, cy)].append((i, ax, ay, bx, by))
 
-    for lat, lon, period in crimes:
+    for lat, lon, period, weight in crimes:
         px, py = xy(lat, lon)
         cx, cy = int(math.floor(px / cell)), int(math.floor(py / cell))
         best, best_d = None, max_m
@@ -164,8 +172,10 @@ def assign_crimes(geoms, crimes, max_m=CRIME_SNAP_M):
         if best is not None:
             if period != "night":
                 counts[best][0] += 1
+                counts[best][2] += weight
             if period != "day":
                 counts[best][1] += 1
+                counts[best][3] += weight
     return counts
 
 
@@ -260,11 +270,11 @@ def city_from_osm(data, crimes):
         graph[b].append((a, e))
 
     next_id = -1
-    for (u, v, g, tags), (cd, cn) in zip(raw, counts):
+    for (u, v, g, tags), (cd, cn, wd, wn) in zip(raw, counts):
         length = path_m(g)
         lit, hw = tags.get("lit"), tags.get("highway")
         iso = hw in ISOLATED_WAYS and tags.get("footway") not in NOT_ISOLATED_FOOTWAYS
-        e = Edge(length, edge_risk(length, cd, lit, iso, False), edge_risk(length, cn, lit, iso, True),
+        e = Edge(length, edge_risk(length, wd, lit, iso, False), edge_risk(length, wn, lit, iso, True),
                  cd, cn, lit, hw, tags.get("name", ""), g)
         if all(nb != v for nb, _ in graph[u]):
             add(u, v, e)
