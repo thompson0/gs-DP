@@ -8,7 +8,7 @@ import folium
 import streamlit as st
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
-from streamlit_js_eval import streamlit_js_eval
+from streamlit_geolocation import streamlit_geolocation
 
 from city_graph import CRIMES_PATH, all_crimes, build_city, geocode, nearest_node
 from routing import dijkstra, haversine_m, nearest_safe_table, path_length_m, path_to_safe, safest_within
@@ -25,21 +25,9 @@ TEAL = "#0F3D44"
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 DEFAULT_CENTER = (-23.5643, -46.6527)
 GOOD_ACCURACY_M = 50
-GPS_JS = """new Promise(resolve => {
-  if (!navigator.geolocation) return resolve({error: 'unsupported'});
-  let best = null, id = null;
-  const done = () => { navigator.geolocation.clearWatch(id); resolve(best || {error: 'timeout'}); };
-  id = navigator.geolocation.watchPosition(p => {
-    if (!best || p.coords.accuracy < best.accuracy)
-      best = {lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy};
-    if (best.accuracy <= 30) done();
-  }, e => { if (!best) resolve({error: e.message}); }, {enableHighAccuracy: true, maximumAge: 0, timeout: 15000});
-  setTimeout(done, 5000);
-})"""
 
 st.set_page_config(page_title=APP_NAME, page_icon=os.path.join(ASSETS, "favicon.png"), layout="wide")
 st.logo(os.path.join(ASSETS, "logo_dark.png"), icon_image=os.path.join(ASSETS, "favicon.png"), size="large")
-st.html("<style>[data-testid=stElementContainer]:has(iframe[title*=streamlit_js_eval]){display:none}</style>")
 
 
 @st.cache_resource(show_spinner=False)
@@ -161,22 +149,21 @@ def you_are_here(m, origin):
 
 def gps_origin():
     with st.sidebar:
-        gps = streamlit_js_eval(js_expressions=GPS_JS, key=f"gps_{st.session_state.setdefault('gps_try', 0)}")
+        gps = streamlit_geolocation()
     if st.session_state.get("pin"):
         st.sidebar.success("Usando a posição marcada no mapa.")
         return st.session_state.pin, None, "Posição marcada no mapa"
-    if gps is None:
-        st.sidebar.info("Obtendo sua localização. Permita o acesso quando o navegador pedir.")
+    if not gps or gps.get("latitude") is None:
+        st.sidebar.info("Toque no botão de localização e permita o acesso quando o navegador pedir.")
         return None, None, None
-    if "error" in gps:
-        st.sidebar.error("Não foi possível obter a localização. Permita o acesso ou digite o endereço.")
-        return None, None, None
-    accuracy = gps["accuracy"]
-    if accuracy <= GOOD_ACCURACY_M:
+    accuracy = gps.get("accuracy")
+    if accuracy is None:
+        st.sidebar.success("Localização obtida.")
+    elif accuracy <= GOOD_ACCURACY_M:
         st.sidebar.success(f"Localização obtida (precisão de ~{accuracy:.0f} m).")
     else:
         st.sidebar.warning(f"Localização imprecisa (~{accuracy:.0f} m). Toque no mapa para marcar onde você está.")
-    return (gps["lat"], gps["lon"]), accuracy, "Sua localização atual"
+    return (float(gps["latitude"]), float(gps["longitude"])), accuracy, "Sua localização atual"
 
 
 def sidebar():
@@ -185,8 +172,7 @@ def sidebar():
     origin = accuracy = origin_label = origin_text = None
     if mode.startswith("Minha"):
         origin, accuracy, origin_label = gps_origin()
-        if st.sidebar.button("Atualizar localização", use_container_width=True):
-            st.session_state.gps_try += 1
+        if st.session_state.get("pin") and st.sidebar.button("Remover ponto marcado", use_container_width=True):
             st.session_state.pop("pin", None)
             st.rerun()
     else:

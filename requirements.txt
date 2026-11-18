@@ -1,4 +1,4 @@
 streamlit>=1.66
-streamlit-js-eval>=0.1.7
+streamlit-geolocation>=0.0.10
 folium>=0.19
 streamlit-folium>=0.24

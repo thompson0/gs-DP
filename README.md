@@ -29,7 +29,7 @@ Global Solution 2026.2, **CitizenTech**. Disciplina: **Dynamic Programming**.
 ## Funcionalidades
 
 1. **Entrada direta.** Ao abrir o site, o app já pede a localização. A barra lateral pergunta o destino.
-2. **Origem pelo GPS em alta precisão.** O app usa `enableHighAccuracy` e fica com a melhor leitura em até 5 s. Se a precisão passar de 50 m, ele avisa e a usuária toca no mapa para marcar onde está. Também é possível digitar o endereço.
+2. **Origem pelo GPS.** A usuária toca no botão de localização (`streamlit-geolocation`) e permite o acesso. Se a precisão passar de 50 m, o app avisa e ela toca no mapa para marcar onde está. Também é possível digitar o endereço.
 3. **Destino por endereço.** O endereço é convertido em coordenada pelo Nominatim (OpenStreetMap).
 4. **Três rotas, uma por vez:**
    - **Recomendada:** a mais segura entre as que andam no máximo X% a mais que a mais curta (padrão +30%, ajustável na barra lateral).
